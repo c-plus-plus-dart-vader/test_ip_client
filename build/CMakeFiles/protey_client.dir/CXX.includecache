@@ -1,0 +1,22 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/boldyrev/protey_client/Client.hpp
+arpa/inet.h
+-
+string_view
+-
+
+/home/boldyrev/protey_client/main.cpp
+iostream
+-
+string
+-
+Client.hpp
+/home/boldyrev/protey_client/Client.hpp
+
