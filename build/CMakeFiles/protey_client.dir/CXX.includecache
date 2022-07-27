@@ -6,17 +6,33 @@
 
 #IncludeRegexTransform: 
 
+/home/boldyrev/protey_client/Client.cpp
+iostream
+-
+cstring
+-
+sys/socket.h
+-
+netinet/in.h
+-
+unistd.h
+-
+errno.h
+-
+charconv
+-
+poll.h
+-
+vector
+-
+algorithm
+-
+Client.hpp
+/home/boldyrev/protey_client/Client.hpp
+
 /home/boldyrev/protey_client/Client.hpp
 arpa/inet.h
 -
 string_view
 -
-
-/home/boldyrev/protey_client/main.cpp
-iostream
--
-string
--
-Client.hpp
-/home/boldyrev/protey_client/Client.hpp
 
