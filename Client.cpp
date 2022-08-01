@@ -68,13 +68,17 @@ Client::Res_e Client::ValidateInputParams(std::string_view params)
 
 Client::Res_e Client::ErrorHandlingExceptEINTR(bool IsWrite)
 {
-	if(errno == EPIPE)
+	if(errno == ECONNRESET)
 	{
 		cout<<__filename__<<"Connection is broken and socket "<<m_desc<<" will be closed\n";
 		close(m_desc);
 		m_desc = -1;
 		m_is_started = false;
 		return Res_e::CONNECTION_BROKEN;	
+	}
+	else if ((errno == ENOBUFS) or (errno == ENOMEM))
+	{
+		return Res_e::TEMPORARY_UNSUFFICIENT_RESOURCES;
 	}
 	else
 	{
@@ -171,9 +175,11 @@ Client::Res_e Client::SendMsg(std::string const& msg)
 	
 	if (IPPROTO_TCP == m_proto)
 	{
-		while(1)
+		size_t start_pos = 0;
+		size_t len_to_send = msg.size();
+		while(msg.size() != start_pos)
 		{
-			auto written_bytes = write(m_desc, msg.data(), msg.size());
+			auto written_bytes = send(m_desc, msg.data() + start_pos, len_to_send, 0);
 			if (-1 == written_bytes)
 			{
 				if (errno == EINTR)
@@ -186,17 +192,25 @@ Client::Res_e Client::SendMsg(std::string const& msg)
 			else
 			{
 				cout<<__filename__<<"Socket "<<m_desc<<" write "<<written_bytes<<" bytes\n";
-				if (written_bytes != msg.size())
-				{
-					cout<<__filename__<<"Not all data was sent\n";
-					return Res_e::FAILURE;
-				}
-				break;
+				start_pos += written_bytes;
+				len_to_send = msg.size() - start_pos;
 			}
 		}
 		
 		char end = '\n';
-		write(m_desc, &end, 1);
+		while(1)
+		{
+			if (-1 == send(m_desc, &end, 1, 0))
+			{
+				if (errno == EINTR)
+				{
+					cout<<__filename__<<"EINTR is received.Try again send message\n";
+					continue;
+				}
+				return ErrorHandlingExceptEINTR(true);	
+			}
+			break;
+		}
 		cout<<__filename__<<"Socket "<<m_desc<<" write END byte\n";
 		
 		char buffer[TCP_READ_BUFFER_SIZE];
