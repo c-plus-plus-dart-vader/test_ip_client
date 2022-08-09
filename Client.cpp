@@ -1,4 +1,3 @@
-//#define _GNU_SOURCE 
 #include <iostream>
 #include <cstring>
 #include <sys/socket.h>
@@ -10,10 +9,15 @@
 #include <vector>
 #include <algorithm>
 #include "Client.hpp"
+#include "Logger.hpp"
 
 using namespace std;
 
-constexpr char const*const __filename__ = "Client.";
+template<class ... Args>
+void Log(Args&& ... args)
+{
+	utils::Log("Client.cpp: ", forward<Args>(args)...);
+}
 
 constexpr string_view      UDP_PACKET_BEGIN {"proteyclient"};
 
@@ -21,13 +25,13 @@ constexpr string_view      tcp_proto{"TCP"};
 constexpr string_view      udp_proto{"UDP"};
 
 constexpr size_t sv_npos = string_view::npos;
-constexpr size_t TCP_READ_BUFFER_SIZE = 20;
+constexpr size_t TCP_READ_BUFFER_SIZE = 25;
 
 
-constexpr uint8_t UDP_PH_QTY_POS         = UDP_PACKET_BEGIN.size();
-constexpr uint8_t UDP_PH_SEQ_NUM_POS     = UDP_PH_QTY_POS + 2;
-constexpr uint8_t UDP_PH_SIZE_POS        = UDP_PH_SEQ_NUM_POS + 2;
-constexpr uint8_t UDP_PACKET_HEADER_SIZE = UDP_PH_SIZE_POS + 2;
+constexpr uint16_t UDP_PH_QTY_POS         = UDP_PACKET_BEGIN.size();
+constexpr uint16_t UDP_PH_SEQ_NUM_POS     = UDP_PH_QTY_POS + 2;
+constexpr uint16_t UDP_PH_SIZE_POS        = UDP_PH_SEQ_NUM_POS + 2;
+constexpr uint16_t UDP_PACKET_HEADER_SIZE = UDP_PH_SIZE_POS + 2;
 
 Client::Res_e Client::ValidateInputParams(std::string_view params)
 {
@@ -70,30 +74,28 @@ Client::Res_e Client::ErrorHandlingExceptEINTR(bool IsWrite)
 {
 	if(errno == ECONNRESET)
 	{
-		cout<<__filename__<<"Connection is broken and socket "<<m_desc<<" will be closed\n";
+		Log("Connection is broken and socket ", m_desc, " will be closed");
 		close(m_desc);
 		m_desc = -1;
 		m_is_started = false;
 		return Res_e::CONNECTION_BROKEN;	
 	}
-	else if ((errno == ENOBUFS) or (errno == ENOMEM))
-	{
+	Log(IsWrite ? "Write" : "Read", " to server failed: ", strerror(errno));
+	if ((errno == ENOBUFS) or (errno == ENOMEM)) {
 		return Res_e::TEMPORARY_UNSUFFICIENT_RESOURCES;
 	}
-	else
-	{
-		cout<<__filename__<<(IsWrite ? "Write" : "Read")<<" to server failed: "<<strerror(errno)<<"\n";
+	else {
 		return Res_e::FAILURE;
 	}
 }
 
 Client::~Client()
 {
-	cout<<__filename__<<"DTOR\n";
+	Log("DTOR");
 	if (-1 != m_desc)
 	{
 		close(m_desc);
-		cout<<__filename__<<((m_proto == IPPROTO_TCP) ? tcp_proto : udp_proto)<<" socket "<<m_desc<<" was closed\n";
+		Log(m_proto == IPPROTO_TCP ? tcp_proto : udp_proto, " socket ", m_desc, " was closed");
 	}
 }		
 
@@ -111,21 +113,21 @@ Client::Res_e Client::Start()
 	m_desc = socket(AF_INET, (m_proto == IPPROTO_TCP) ? SOCK_STREAM : SOCK_DGRAM, m_proto);
 	if (-1 == m_desc)
 	{
-		cout<<__filename__<<"Creation of an unbound socket and get file descriptor failed: "<<strerror(errno)<<"\n";
+		Log("Creation of an unbound socket and get file descriptor failed: ", strerror(errno));
 		if ((errno == ENFILE)or(errno == EMFILE)or(errno == ENOBUFS)or(errno == ENOMEM))
 		{
-			cout<<__filename__<<"You can try to create socket later\n";
+			Log("You can try to create socket later");
 			return Res_e::TEMPORARY_UNSUFFICIENT_RESOURCES;
 		}
 		return Res_e::FAILURE;
 	}
-	cout<<__filename__<<((m_proto == IPPROTO_TCP) ? tcp_proto : udp_proto)<<" socket "<<m_desc<<" is created\n";
+	Log(IPPROTO_TCP == m_proto ? tcp_proto : udp_proto, " socket ", m_desc, " is created");
 	
 	if (IPPROTO_TCP == m_proto)
 	{	
 		if (-1 == connect(m_desc, (sockaddr const*)&m_server_sa, sizeof(m_server_sa)))
 		{
-			cout<<__filename__<<"Connect to TCP server failed: "<<strerror(errno)<<"\n";
+			Log("Connect to TCP server failed: ", strerror(errno));
 			if (errno == EINTR)
 			{
 				pollfd pfd;
@@ -142,25 +144,28 @@ Client::Res_e Client::Start()
 						if (-1 == getsockopt(m_desc, SOL_SOCKET, SO_ERROR, &res, &len)) { break; }
 						if (res != 0) { break; } 
 						
-						cout<<__filename__<<"Socket "<<m_desc<<" connected to TCP server\n";
+						Log("Socket ", m_desc, " connected to TCP server");
 						m_is_started = true;
 						return Res_e::SUCCESS;
 					}
 					else//0 value(timer expired) is impossible because third param in poll call is -1
 					{
-						if (errno != EINTR) { cout<<__filename__<<"Connect to TCP server failed after EINTR: "<<strerror(errno)<<"\n"; break; }
+						if (errno != EINTR) {
+							Log("Connect to TCP server failed after EINTR: ", strerror(errno));
+							break;
+						}
 						pfd.revents = 0;
 					}
 				}				
 				
 			}
-			cout<<__filename__<<"Socket "<<m_desc<<" will be closed\n";
+			Log("Socket ", m_desc, " will be closed");
 			close(m_desc);
 			m_desc = -1;
 			return Res_e::FAILURE; 
 		}
 		
-		cout<<__filename__<<"Socket "<<m_desc<<" connected to TCP server\n";
+		Log("Socket ", m_desc, " connected to TCP server");
 	}
 	
 	m_is_started = true;
@@ -171,7 +176,7 @@ Client::Res_e Client::SendMsg(std::string const& msg)
 {
 	if (not m_is_started) return Res_e::NOT_STARTED;
 	if (msg.empty()) return Res_e::NO_DATA_TO_SEND;
-	cout<<__filename__<<"Socket "<<m_desc<<" starts sending request with size "<<msg.size()<<" bytes\n";
+	Log("Socket ", m_desc, " starts sending request with size ", msg.size(), " bytes");
 	
 	if (IPPROTO_TCP == m_proto)
 	{
@@ -179,19 +184,19 @@ Client::Res_e Client::SendMsg(std::string const& msg)
 		size_t len_to_send = msg.size();
 		while(msg.size() != start_pos)
 		{
-			auto written_bytes = send(m_desc, msg.data() + start_pos, len_to_send, 0);
+			int written_bytes = send(m_desc, msg.data() + start_pos, len_to_send, 0);
 			if (-1 == written_bytes)
 			{
 				if (errno == EINTR)
 				{
-					cout<<__filename__<<"EINTR is received.Try again send message\n";
+					Log("EINTR is received.Try again send message");
 					continue;
 				}
 				return ErrorHandlingExceptEINTR(true);
 			}
 			else
 			{
-				cout<<__filename__<<"Socket "<<m_desc<<" write "<<written_bytes<<" bytes\n";
+				Log("Socket ", m_desc, " write ", written_bytes, " bytes");
 				start_pos += written_bytes;
 				len_to_send = msg.size() - start_pos;
 			}
@@ -204,33 +209,33 @@ Client::Res_e Client::SendMsg(std::string const& msg)
 			{
 				if (errno == EINTR)
 				{
-					cout<<__filename__<<"EINTR is received.Try again send message\n";
+					Log("EINTR is received.Try again send message");
 					continue;
 				}
 				return ErrorHandlingExceptEINTR(true);	
 			}
 			break;
 		}
-		cout<<__filename__<<"Socket "<<m_desc<<" write END byte\n";
+		Log("Socket ", m_desc, " write END byte");
 		
 		char buffer[TCP_READ_BUFFER_SIZE];
 		m_last_received_answer.clear();
 		while(1) 
 		{ 
-			size_t read_bytes = read(m_desc, buffer, TCP_READ_BUFFER_SIZE);
+			int read_bytes = read(m_desc, buffer, TCP_READ_BUFFER_SIZE);
 
 			if (-1 == read_bytes)
 			{
 				if (errno == EINTR)
 				{
-					cout<<__filename__<<"EINTR is received.Try again read message\n";
+					Log("EINTR is received.Try again read message");
 					continue;
 				}
 				return ErrorHandlingExceptEINTR(false);
 			}
 			else
 			{
-				cout<<__filename__<<"Socket "<<m_desc<<" read "<<read_bytes<<" bytes\n";	
+				Log("Socket ", m_desc, " read ", read_bytes, " bytes");	
 				m_last_received_answer.append(buffer, read_bytes);
 			}
 			
@@ -249,91 +254,116 @@ Client::Res_e Client::SendMsg(std::string const& msg)
 	{
 		//UDP_PACKET_BEGIN(12 bytes) + PACKETS_QTY(2 bytes) + PACKET_NUMBER(2 bytes) + PACKET_SIZE(2 bytes)
 		uint16_t constexpr packet_size = 64;
-		uint16_t packet_qty = msg.size()/(packet_size - UDP_PACKET_HEADER_SIZE);
+		uint16_t packets_qty = msg.size()/(packet_size - UDP_PACKET_HEADER_SIZE);
 		uint16_t ost = msg.size()%(packet_size - UDP_PACKET_HEADER_SIZE);
-		if (ost > 0){ ++packet_qty; }
-		for (size_t i = 0; i < packet_qty; ++i)
+		if (ost > 0){ ++packets_qty; }
+		Log("Packets qty is ", packets_qty);
+		size_t i = 0;
+		for (; i < packets_qty; )
 		{
 			char wbuff[packet_size];
 			memcpy(wbuff, UDP_PACKET_BEGIN.data(), UDP_PACKET_BEGIN.size());
-			wbuff[UDP_PH_QTY_POS] = (packet_qty&0xff00)>>8;
-			wbuff[UDP_PH_QTY_POS + 1] = packet_qty&0xff;
-			
-			wbuff[UDP_PH_SEQ_NUM_POS] = (i&0xff00)>>8;
-			wbuff[UDP_PH_SEQ_NUM_POS + 1] = i&0xff;
-			
-			wbuff[UDP_PH_SIZE_POS] = (packet_size&0xff00)>>8;
-			wbuff[UDP_PH_SIZE_POS + 1] = packet_size&0xff;
-			
+			uint16_t packets_qty_net = htons(packets_qty);
+			memcpy(wbuff + UDP_PH_QTY_POS, &packets_qty_net, sizeof(packets_qty_net));
+			uint16_t seq_num_net = htons(i);
+			memcpy(wbuff + UDP_PH_SEQ_NUM_POS, &seq_num_net, sizeof(seq_num_net));
+			uint16_t ps_net = htons(packet_size);
+			memcpy(wbuff + UDP_PH_SIZE_POS, &ps_net, sizeof(ps_net));
+
 			size_t payload_len;
-			if ((packet_qty - 1) == i and ost > 0) payload_len = ost;
+			if ((packets_qty - 1) == i and ost > 0) payload_len = ost;
 			else payload_len = packet_size - UDP_PACKET_HEADER_SIZE;
 			
 			memcpy(&wbuff[UDP_PACKET_HEADER_SIZE], &msg[i*(packet_size - UDP_PACKET_HEADER_SIZE)], payload_len);
 			
 			socklen_t len = sizeof(m_server_sa);
-			sendto(m_desc, wbuff, UDP_PACKET_HEADER_SIZE + payload_len, 0, (sockaddr const*)&m_server_sa, len);
+			int written_bytes = sendto(m_desc, wbuff, UDP_PACKET_HEADER_SIZE + payload_len, 0, (sockaddr const*)&m_server_sa, len);
+			if (written_bytes >= 0)
+			{
+				Log("Socket ", m_desc, " write ", written_bytes, " bytes");
+				if (written_bytes != (UDP_PACKET_HEADER_SIZE + payload_len)) {
+					Log("Socket ", m_desc, " will repeat this packet sending");
+					continue;
+				}
+				++i;
+			}
+			else {
+				if (errno == EINTR)
+				{
+					Log("EINTR is received.Try again read message");
+					continue;
+				}
+				Log("Write failed: ", strerror(errno));
+				return Res_e::FAILURE;
+			}
 		}
 		
 		uint16_t rd_packets_qty;
-		uint16_t rd_packet_size;
 		char buffer [MAX_UDP_PACKET_SIZE];
 		vector<size_t> packet_numbers;
 		do
 		{
 			socklen_t len = sizeof(m_server_sa);
-			auto read_bytes = recvfrom(m_desc, buffer, MAX_UDP_PACKET_SIZE, 0, (sockaddr*)&m_server_sa, &len);
-			if (read_bytes)
+			int read_bytes = recvfrom(m_desc, buffer, MAX_UDP_PACKET_SIZE, 0, (sockaddr*)&m_server_sa, &len);
+			if (read_bytes > 0)
 			{
-				cout<<__filename__<<"Socket "<<m_desc<<" read "<<read_bytes<<" bytes\n";
+				Log("Socket ", m_desc, " read ", read_bytes, " bytes");
 
-				if (read_bytes < (UDP_PACKET_HEADER_SIZE + 1))
+				if (read_bytes < UDP_PACKET_HEADER_SIZE)
 				{
-					cout<<__filename__<<"Packet is not from protey client\n";
+					Log("Packet is not from protey client");
 					continue;
 				}
 				if (string_view{buffer, UDP_PACKET_BEGIN.size()} != UDP_PACKET_BEGIN)
 				{
-					cout<<__filename__<<"Packet is not from protey server\n";
+					Log("Packet is not from protey server");
+					continue;
+				}
+				
+				uint16_t rd_packet_number;
+				memcpy(&rd_packet_number, buffer + UDP_PH_SEQ_NUM_POS, sizeof(rd_packet_number));
+				rd_packet_number = ntohs(rd_packet_number);
+				Log("Packet number is ", rd_packet_number);
+				
+				if (find(packet_numbers.begin(), packet_numbers.end(), rd_packet_number) != packet_numbers.end())
+				{
+					Log("Duplicated packet");
 					continue;
 				}
 				
 				if (packet_numbers.empty())
 				{
-					rd_packets_qty = ((uint16_t)buffer[UDP_PH_QTY_POS]<<8)|(uint16_t)buffer[UDP_PH_QTY_POS + 1];
-					cout<<__filename__<<"Packet qty is "<<rd_packets_qty<<"\n";
-					rd_packet_size = ((uint16_t)buffer[UDP_PH_SIZE_POS]<<8)|(uint16_t)buffer[UDP_PH_SIZE_POS + 1];
-					cout<<__filename__<<"Packet size is "<<rd_packet_size<<"\n";
-					m_last_received_answer.resize(rd_packets_qty*(rd_packet_size - UDP_PACKET_HEADER_SIZE));
-				}
-				uint16_t rd_packet_number = ((uint16_t)buffer[UDP_PH_SEQ_NUM_POS]<<8)|(uint16_t)buffer[UDP_PH_SEQ_NUM_POS + 1];
-				cout<<__filename__<<"Packet number is "<<rd_packet_number<<"\n";
-				if (find(packet_numbers.begin(), packet_numbers.end(), rd_packet_number) != packet_numbers.end())
-				{
-					cout<<__filename__<<"Duplicated packet\n";
-					continue;
+					memcpy(&rd_packets_qty, buffer + UDP_PH_QTY_POS, sizeof(rd_packets_qty));
+					rd_packets_qty = ntohs(rd_packets_qty);
+					Log("Packet qty is ", rd_packets_qty);
+					m_last_received_answer.resize(rd_packets_qty*(packet_size - UDP_PACKET_HEADER_SIZE));
 				}
 				
 				if (rd_packet_number != (rd_packets_qty - 1))//not the last packet of message
 				{
-					if (read_bytes != rd_packet_size)
+					if (read_bytes != packet_size)
 					{
-						cout<<__filename__<<"Damaged packet\n";
+						Log("Damaged packet");
 						continue;
 					}
 				}
 				else
 				{
-					m_last_received_answer.resize((rd_packets_qty - 1)*(rd_packet_size - UDP_PACKET_HEADER_SIZE) + read_bytes - UDP_PACKET_HEADER_SIZE);
+					m_last_received_answer.resize((rd_packets_qty - 1)*(packet_size - UDP_PACKET_HEADER_SIZE) + read_bytes - UDP_PACKET_HEADER_SIZE);
 				}
 				packet_numbers.push_back(rd_packet_number);
-				memcpy(&m_last_received_answer[rd_packet_number*(rd_packet_size - UDP_PACKET_HEADER_SIZE)], &buffer[UDP_PACKET_HEADER_SIZE], read_bytes - UDP_PACKET_HEADER_SIZE);
+				memcpy(&m_last_received_answer[rd_packet_number*(packet_size - UDP_PACKET_HEADER_SIZE)], &buffer[UDP_PACKET_HEADER_SIZE], read_bytes - UDP_PACKET_HEADER_SIZE);
 			}
-			if (-1 == read_bytes)
+			else if (0 == read_bytes)
+			{
+				Log("Socket read 0 bytes");
+				continue;
+			}
+			else
 			{
 				if (errno == EINTR)
 				{
-					cout<<__filename__<<"EINTR is received.Try again read message\n";
+					Log("EINTR is received.Try again read message");
 					continue;
 				}
 				return ErrorHandlingExceptEINTR(false);
@@ -341,7 +371,7 @@ Client::Res_e Client::SendMsg(std::string const& msg)
 		}while(rd_packets_qty != packet_numbers.size());
 	}
 	
-	cout<<__filename__<<"Answer:\n"<<m_last_received_answer<<'\n';
+	Log("Answer:\n", m_last_received_answer);
 	
 	return Res_e::SUCCESS;
 }

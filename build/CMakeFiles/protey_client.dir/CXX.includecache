@@ -6,6 +6,14 @@
 
 #IncludeRegexTransform: 
 
+../../protey_common/Logger.hpp
+iostream
+-
+string
+-
+type_traits
+-
+
 /home/boldyrev/protey_client/Client.cpp
 iostream
 -
@@ -29,6 +37,8 @@ algorithm
 -
 Client.hpp
 /home/boldyrev/protey_client/Client.hpp
+Logger.hpp
+/home/boldyrev/protey_client/Logger.hpp
 
 /home/boldyrev/protey_client/Client.hpp
 arpa/inet.h
